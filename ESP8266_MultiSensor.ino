@@ -14,7 +14,8 @@ DHT dht(DHT_PIN, DHTTYPE);
 const char* ssid = "YOUR_SSID";
 const char* password = "YOUR_PASSWORD";
 
-// Render host only (no https://)
+// Render host only (IMPORTANT: no https:// and no trailing slash)
+// Example: "multi-sensor-dashboard-2026.onrender.com"
 const char* server = "your-app.onrender.com";
 const int httpsPort = 443;
 
@@ -84,6 +85,7 @@ void sendDataToServer() {
 
   WiFiClientSecure client;
   client.setInsecure(); // For development (no certificate check)
+  client.setTimeout(15000);
 
   Serial.print("Connecting to server: ");
   Serial.println(server);
@@ -98,15 +100,17 @@ void sendDataToServer() {
     + "&soil_moisture=" + String(soil_moisture, 2)
     + "&motion=" + (motion_detected ? "1" : "0");
 
-  client.print(String("GET ") + url + " HTTP/1.1\r\n" +
-    "Host: " + server + "\r\n" +
-    "User-Agent: ESP8266\r\n" +
-    "Connection: close\r\n\r\n");
+  // Cloudflare/Render-friendly request (avoid malformed headers)
+  client.print(String("GET ") + url + " HTTP/1.1\r\n");
+  client.print(String("Host: ") + server + "\r\n");
+  client.print("User-Agent: ESP8266\r\n");
+  client.print("Accept: */*\r\n");
+  client.print("Connection: close\r\n\r\n");
 
   // Read response
   String response = "";
   unsigned long start = millis();
-  while (client.connected() && millis() - start < 8000) {
+  while ((client.connected() || client.available()) && millis() - start < 15000) {
     while (client.available()) {
       char c = client.read();
       response += c;
@@ -115,7 +119,7 @@ void sendDataToServer() {
   }
   client.stop();
 
-  if (response.indexOf("\"success\":true") != -1 || response.indexOf("success") != -1) {
+  if (response.indexOf("HTTP/1.1 200") != -1 && (response.indexOf("\"success\":true") != -1 || response.indexOf("success") != -1)) {
     Serial.println("Data sent successfully!");
   } else {
     Serial.println("Send failed!");
